@@ -1,0 +1,21 @@
+{
+  "name": "one-storage",
+  "version": "1.0.0",
+  "description": "极简个人实时云草稿纸与24小时文件快传中转站",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "busboy": "^1.6.0",
+    "express": "^4.21.2",
+    "ua-parser-js": "^2.0.2",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

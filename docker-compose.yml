@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  one-storage:
+    build: .
+    container_name: one-storage
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      # 请在此处修改你的专属访问密码
+      - APP_PASSWORD=your_secure_password
+      # 文件自动物理销毁时间 (小时)
+      - FILE_EXPIRE_HOURS=24
+      # 信任设备免密保持时间 (天)
+      - SESSION_EXPIRE_DAYS=14
+      # 单个文件最大体积限制 (MB)
+      - MAX_FILE_SIZE_MB=5120
+      # 端口号
+      - PORT=8080
+    volumes:
+      # 数据持久化目录 (包含 SQLite 数据库及上传的文件)
+      - ./data:/app/data

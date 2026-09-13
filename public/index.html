@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>One Storage</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 87.3 78%22><path d=%22m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z%22 fill=%22%230066da%22/><path d=%22m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0 -1.2 4.5h27.5z%22 fill=%22%2300ac47%22/><path d=%22m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.5l5.85 10.15z%22 fill=%22%23ea4335%22/><path d=%22m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z%22 fill=%22%2300832d%22/><path d=%22m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z%22 fill=%22%232684fc%22/><path d=%22m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z%22 fill=%22%23ffba00%22/></svg>">
+</head>
+<body>
+
+  <!-- 顶部导航栏 -->
+  <header class="navbar">
+    <div class="container nav-content">
+      <div class="logo-area">
+        <!-- 类似 Google Drive 的三色几何立体矢量图标 -->
+        <svg class="drive-logo-svg" viewBox="0 0 87.3 78" width="28" height="25">
+          <path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/>
+          <path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0 -1.2 4.5h27.5z" fill="#00ac47"/>
+          <path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.5l5.85 10.15z" fill="#ea4335"/>
+          <path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/>
+          <path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/>
+          <path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/>
+        </svg>
+        <span class="logo-title">One Storage</span>
+        <div class="nav-status" id="ws-status">
+          <span class="status-dot" id="status-dot"></span>
+          <span id="status-text">连接中</span>
+        </div>
+      </div>
+      <div class="nav-actions">
+        <button class="btn btn-tonal btn-sm" id="btn-devices">设备</button>
+        <button class="btn btn-outline btn-sm" id="btn-logout">锁定</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- 主应用区域 -->
+  <main class="container main-container">
+    <div class="main-grid">
+      
+      <!-- 左侧：文本 -->
+      <section class="surface-card">
+        <div class="card-header">
+          <h2 class="card-title">文本</h2>
+          <div class="card-header-actions">
+            <button class="btn btn-tonal btn-sm" id="btn-copy-notepad">复制</button>
+            <button class="btn btn-danger-text btn-sm" id="btn-clear-notepad">清空</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="notepad-container">
+            <textarea 
+              id="notepad-input" 
+              class="notepad-textarea" 
+              placeholder="在此输入或粘贴文本..."
+              spellcheck="false"
+            ></textarea>
+            <div class="notepad-footer">
+              <span id="notepad-char-count">0 字</span>
+              <span class="sync-badge" id="notepad-sync-status">
+                <span class="dot-indicator"></span> 已同步
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 右侧：文件 -->
+      <section class="surface-card">
+        <div class="card-header">
+          <h2 class="card-title">文件</h2>
+        </div>
+        <div class="card-body">
+          
+          <!-- 上传拖拽区域 -->
+          <div class="dropzone" id="dropzone">
+            <input type="file" id="file-input" multiple style="display: none;">
+            <div class="dropzone-text">点击或拖拽文件至此</div>
+            <div class="dropzone-hint">支持粘贴截图或文件</div>
+          </div>
+
+          <!-- 上传进度条 -->
+          <div class="upload-progress-container" id="upload-progress">
+            <div class="progress-header">
+              <span id="upload-filename">正在上传...</span>
+              <span id="upload-percentage">0%</span>
+            </div>
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" id="progress-bar-fill"></div>
+            </div>
+          </div>
+
+          <!-- 文件列表区域 -->
+          <div class="file-list-header">
+            <span class="file-list-title">已存文件 (<span id="file-count">0</span>)</span>
+            <button class="btn btn-text btn-sm" id="btn-refresh-files">刷新</button>
+          </div>
+
+          <div class="file-list" id="file-list">
+            <!-- 动态渲染文件列表 -->
+            <div class="empty-state" id="empty-state">
+              暂无文件
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- 锁屏密码输入弹窗 -->
+  <div class="lock-screen" id="lock-screen" style="display: none;">
+    <div class="lock-card" id="lock-card">
+      <div class="lock-logo-wrapper">
+        <svg viewBox="0 0 87.3 78" width="42" height="38">
+          <path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/>
+          <path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0 -1.2 4.5h27.5z" fill="#00ac47"/>
+          <path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.5l5.85 10.15z" fill="#ea4335"/>
+          <path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/>
+          <path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/>
+          <path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/>
+        </svg>
+      </div>
+      <h1 class="lock-title">One Storage</h1>
+      
+      <form id="login-form">
+        <input 
+          type="password" 
+          id="password-input" 
+          class="lock-input" 
+          placeholder="访问密码" 
+          autocomplete="current-password"
+          required
+        />
+        <button type="submit" class="btn btn-primary btn-full">
+          进入
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- 信任设备管理弹窗 -->
+  <div class="modal-backdrop" id="devices-modal" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">已登录设备</h3>
+        <button class="btn btn-icon" id="btn-close-modal">✕</button>
+      </div>
+      <div class="modal-body" id="devices-list">
+        <!-- 动态渲染设备列表 -->
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-danger-tonal btn-sm" id="btn-revoke-others">
+          踢出其他设备
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 全局 Toast 提示容器 -->
+  <div id="toast-container"></div>
+
+  <!-- 脚本加载 -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
