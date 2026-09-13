@@ -108,6 +108,7 @@ router.post('/upload', requireAuth, (req, res) => {
 
   bb.on('file', (name, fileStream, info) => {
     const rawFilename = info.filename || '未命名文件';
+    const mimeType = info.mimeType || 'application/octet-stream';
     const filename = safeDecodeFilename(rawFilename);
     const fileId = crypto.randomUUID();
     const ext = path.extname(filename);
