@@ -4,42 +4,12 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import crypto from 'node:crypto';
 import busboy from 'busboy';
-import { requireAuth, validateToken } from '../auth.js';
+import { requireAuth } from '../auth.js';
 import { config } from '../config.js';
 import { fileDb } from '../db.js';
 import { realtimeHub } from '../websocket.js';
-import { createDownloadTicket, verifyDownloadTicket } from '../tickets.js';
 
 const router = express.Router();
-
-/**
- * 文件访问鉴权中间件
- * 支持:
- * 1. URL 临时下载 Ticket (?ticket=xxx)
- * 2. Header Authorization Bearer Token
- */
-function requireFileAccess(req, res, next) {
-  const fileId = req.params.id;
-  const ticket = req.query.ticket;
-
-  // 1. 优先校验临时下载 Ticket
-  if (ticket && verifyDownloadTicket(ticket, fileId)) {
-    return next();
-  }
-
-  // 2. 校验会话 Bearer Token
-  let token = null;
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    token = authHeader.substring(7).trim();
-  }
-
-  if (token && validateToken(token)) {
-    return next();
-  }
-
-  return res.status(401).json({ error: '无效或已过期的访问凭证，请登录或重新获取链接' });
-}
 
 /**
  * 获取文件列表
@@ -60,31 +30,6 @@ router.get('/', requireAuth, (req, res) => {
   }));
 
   res.json({ files, serverTime: now });
-});
-
-/**
- * 为指定文件申请短期只读下载凭证
- * POST /api/files/:id/ticket
- */
-router.post('/:id/ticket', requireAuth, (req, res) => {
-  const fileId = req.params.id;
-  const file = fileDb.findById.get(fileId);
-
-  if (!file || file.expires_at <= Date.now()) {
-    return res.status(404).json({ error: '文件不存在或已过期' });
-  }
-
-  // Ticket 有效期为 1 小时，且不超过文件剩余存活时间
-  const remainingTime = file.expires_at - Date.now();
-  const ttlMs = Math.max(60 * 1000, Math.min(60 * 60 * 1000, remainingTime));
-  const { ticket, expiresAt } = createDownloadTicket(fileId, ttlMs);
-
-  res.json({
-    ticket,
-    expiresAt,
-    downloadUrl: `/api/files/${fileId}/download?ticket=${ticket}`,
-    rawUrl: `/api/files/${fileId}/raw?ticket=${ticket}`,
-  });
 });
 
 /**
@@ -124,7 +69,8 @@ router.post('/upload', requireAuth, (req, res) => {
   });
 
   req.on('close', () => {
-    if (!res.writableEnded) {
+    // 仅当请求数据流未完全接收且响应未结束时，才判定为客户端异常掐断
+    if (!req.complete && !res.writableEnded) {
       isAborted = true;
       cleanupAllActiveTempFiles();
     }
@@ -249,10 +195,10 @@ router.post('/upload', requireAuth, (req, res) => {
 });
 
 /**
- * 下载文件 (凭证校验)
+ * 下载文件 (登录会话校验)
  * GET /api/files/:id/download
  */
-router.get('/:id/download', requireFileAccess, (req, res) => {
+router.get('/:id/download', requireAuth, (req, res) => {
   const fileId = req.params.id;
   const file = fileDb.findById.get(fileId);
 
@@ -276,7 +222,7 @@ router.get('/:id/download', requireFileAccess, (req, res) => {
  * 预览 / 在线查看 (防存储型 XSS 安全防护)
  * GET /api/files/:id/raw
  */
-router.get('/:id/raw', requireFileAccess, (req, res) => {
+router.get('/:id/raw', requireAuth, (req, res) => {
   const fileId = req.params.id;
   const file = fileDb.findById.get(fileId);
 

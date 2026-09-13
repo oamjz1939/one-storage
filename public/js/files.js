@@ -1,4 +1,4 @@
-import { api } from './api.js';
+import { api, authState } from './api.js';
 import { wsClient } from './ws.js';
 
 export class FilesManager {
@@ -79,11 +79,8 @@ export class FilesManager {
           </div>
         </div>
         <div class="file-actions">
-          <button class="btn btn-primary btn-sm btn-download-file" data-id="${file.id}" title="安全下载">
+          <button class="btn btn-primary btn-sm btn-download-file" data-id="${file.id}" title="下载">
             下载
-          </button>
-          <button class="btn btn-tonal btn-sm btn-copy-link" data-id="${file.id}" title="复制临时下载链接">
-            复制链接
           </button>
           <button class="btn btn-danger-text btn-sm btn-delete-file" data-id="${file.id}" title="删除">
             删除
@@ -91,34 +88,19 @@ export class FilesManager {
         </div>
       `;
 
-      // 1. 安全下载：通过短期 Ticket，不泄露全局 Session Token
-      item.querySelector('.btn-download-file').addEventListener('click', async () => {
-        try {
-          const res = await api.getDownloadTicket(file.id);
-          const a = document.createElement('a');
-          a.href = res.downloadUrl;
-          a.download = file.originalName;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-        } catch (err) {
-          this.showToast(`下载失败: ${err.message}`, 'error');
-        }
+      // 1. 直接下载
+      item.querySelector('.btn-download-file').addEventListener('click', () => {
+        const token = authState.getToken();
+        const downloadUrl = `/api/files/${file.id}/download?token=${encodeURIComponent(token)}`;
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = file.originalName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
       });
 
-      // 2. 复制临时分享/下载直链 (Ticket 机制)
-      item.querySelector('.btn-copy-link').addEventListener('click', async () => {
-        try {
-          const res = await api.getDownloadTicket(file.id);
-          const fullUrl = `${window.location.origin}${res.downloadUrl}`;
-          await navigator.clipboard.writeText(fullUrl);
-          this.showToast('已复制临时下载链接', 'success');
-        } catch (err) {
-          this.showToast(`复制失败: ${err.message}`, 'error');
-        }
-      });
-
-      // 3. 删除文件
+      // 2. 删除文件
       item.querySelector('.btn-delete-file').addEventListener('click', async () => {
         if (confirm(`确定删除 ${file.originalName}？`)) {
           try {

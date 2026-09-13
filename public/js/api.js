@@ -114,8 +114,11 @@ export const api = {
     return request('/api/files');
   },
 
-  async getDownloadTicket(fileId) {
-    return request(`/api/files/${fileId}/ticket`, { method: 'POST' });
+  async changePassword(oldPassword, newPassword) {
+    return request('/api/auth/change-password', {
+      method: 'POST',
+      body: { oldPassword, newPassword },
+    });
   },
 
   async deleteFile(id) {

@@ -21,3 +21,6 @@ services:
     volumes:
       # 数据持久化目录 (包含 SQLite 数据库及上传的文件)
       - ./data:/app/data
+      # 代码与静态页面实时挂载 (调整代码即时生效，无需重新构建镜像)
+      - ./src:/app/src
+      - ./public:/app/public

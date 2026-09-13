@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticateAndCreateSession, requireAuth } from '../auth.js';
+import { authenticateAndCreateSession, changePassword, requireAuth } from '../auth.js';
 import { sessionDb } from '../db.js';
 import { realtimeHub } from '../websocket.js';
 import { config } from '../config.js';
@@ -41,6 +41,27 @@ router.get('/me', requireAuth, (req, res) => {
     deviceName: req.session.device_name,
     ip: req.session.ip,
     createdAt: req.session.created_at,
+  });
+});
+
+/**
+ * 修改访问密码 (并自动踢出除当前设备外的所有其他设备)
+ */
+router.post('/change-password', requireAuth, (req, res) => {
+  const { oldPassword, newPassword } = req.body || {};
+
+  const result = changePassword(oldPassword, newPassword);
+  if (!result.success) {
+    return res.status(400).json({ error: result.message });
+  }
+
+  // 改密成功，自动踢出除当前设备外的所有其他设备
+  sessionDb.revokeOthers.run(req.token);
+  realtimeHub.forceLogoutOthers(req.token);
+
+  res.json({
+    success: true,
+    message: '密码修改成功，其他设备已全部自动下线',
   });
 });
 

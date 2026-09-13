@@ -1,7 +1,54 @@
 import crypto from 'node:crypto';
 import { UAParser } from 'ua-parser-js';
 import { config } from './config.js';
-import { sessionDb } from './db.js';
+import { sessionDb, settingsDb } from './db.js';
+
+/**
+ * 初始化密码系统与智能双通道监听：
+ * 若检测到外部 SSH 修改了环境变量 APP_PASSWORD，自动强制覆盖并清除旧自定义密码
+ */
+export function initPasswordSystem() {
+  const currentEnvPass = config.APP_PASSWORD;
+  const lastEnvRow = settingsDb.get.get('last_env_password');
+
+  if (!lastEnvRow) {
+    settingsDb.set.run('last_env_password', currentEnvPass);
+  } else if (lastEnvRow.value !== currentEnvPass) {
+    console.log('=====================================================');
+    console.log('[Auth] 检测到外部环境变量 APP_PASSWORD 变更，已强制覆盖并重置密码！');
+    console.log('=====================================================');
+    settingsDb.set.run('last_env_password', currentEnvPass);
+    settingsDb.delete.run('custom_password');
+  }
+}
+
+// 模块加载时即刻执行环境变量变更检查
+initPasswordSystem();
+
+/**
+ * 获取当前实际生效的访问密码 (优先使用网页自定义密码，回退至环境变量)
+ */
+export function getEffectivePassword() {
+  const customRow = settingsDb.get.get('custom_password');
+  return customRow ? customRow.value : config.APP_PASSWORD;
+}
+
+/**
+ * 修改访问密码
+ */
+export function changePassword(oldPassword, newPassword) {
+  if (!newPassword || typeof newPassword !== 'string' || newPassword.trim().length === 0) {
+    return { success: false, message: '新密码不能为空' };
+  }
+
+  const currentPass = getEffectivePassword();
+  if (!verifyPassword(oldPassword, currentPass)) {
+    return { success: false, message: '原密码错误' };
+  }
+
+  settingsDb.set.run('custom_password', newPassword.trim());
+  return { success: true };
+}
 
 // 登录频率限制存储: Map<ip, { failedAttempts: number, lockedUntil: number, firstAttemptAt: number }>
 const loginAttempts = new Map();
@@ -71,8 +118,8 @@ export function authenticateAndCreateSession({ password, ip, userAgent }) {
     };
   }
 
-  // 2. 恒定时间比对密码
-  const isMatch = verifyPassword(password, config.APP_PASSWORD);
+  // 2. 恒定时间比对密码 (使用当前实际生效的密码)
+  const isMatch = verifyPassword(password, getEffectivePassword());
 
   if (!isMatch) {
     // 记录失败尝试
@@ -149,6 +196,8 @@ export function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     token = authHeader.substring(7).trim();
+  } else if (req.query && req.query.token) {
+    token = req.query.token;
   }
 
   const session = validateToken(token);

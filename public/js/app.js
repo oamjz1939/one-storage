@@ -60,6 +60,7 @@ const filesManager = new FilesManager({
 
 // 3. 鉴权与锁屏处理
 function showLockScreen() {
+  closeChangePwdModal();
   lockScreen.style.display = 'flex';
   wsClient.disconnect();
   filesManager.stopCountdown();
@@ -96,6 +97,81 @@ loginForm.addEventListener('submit', async (e) => {
     setTimeout(() => lockCard.classList.remove('shake'), 350);
   }
 });
+
+// 修改密码弹窗管理
+const changePwdModal = document.getElementById('change-pwd-modal');
+const btnOpenChangePwd = document.getElementById('btn-change-pwd');
+const btnCloseChangePwd = document.getElementById('btn-close-pwd-modal');
+const btnCancelChangePwd = document.getElementById('btn-cancel-pwd');
+const changePwdForm = document.getElementById('change-pwd-form');
+const oldPwdInput = document.getElementById('old-pwd-input');
+const newPwdInput = document.getElementById('new-pwd-input');
+const confirmPwdInput = document.getElementById('confirm-pwd-input');
+
+function openChangePwdModal() {
+  changePwdModal.style.display = 'flex';
+  oldPwdInput.value = '';
+  newPwdInput.value = '';
+  confirmPwdInput.value = '';
+  setTimeout(() => oldPwdInput.focus(), 50);
+}
+
+function closeChangePwdModal() {
+  changePwdModal.style.display = 'none';
+  oldPwdInput.value = '';
+  newPwdInput.value = '';
+  confirmPwdInput.value = '';
+}
+
+if (btnOpenChangePwd) {
+  btnOpenChangePwd.addEventListener('click', openChangePwdModal);
+}
+if (btnCloseChangePwd) {
+  btnCloseChangePwd.addEventListener('click', closeChangePwdModal);
+}
+if (btnCancelChangePwd) {
+  btnCancelChangePwd.addEventListener('click', closeChangePwdModal);
+}
+if (changePwdModal) {
+  changePwdModal.addEventListener('click', (e) => {
+    if (e.target === changePwdModal) {
+      closeChangePwdModal();
+    }
+  });
+}
+
+if (changePwdForm) {
+  changePwdForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const oldPassword = oldPwdInput.value.trim();
+    const newPassword = newPwdInput.value.trim();
+    const confirmPassword = confirmPwdInput.value.trim();
+
+    if (!oldPassword) {
+      showToast('请输入原密码', 'warning');
+      oldPwdInput.focus();
+      return;
+    }
+    if (!newPassword) {
+      showToast('请输入新密码', 'warning');
+      newPwdInput.focus();
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      showToast('两次输入的新密码不一致', 'error');
+      confirmPwdInput.focus();
+      return;
+    }
+
+    try {
+      const res = await api.changePassword(oldPassword, newPassword);
+      showToast(res.message || '密码修改成功，其他设备已退出', 'success');
+      closeChangePwdModal();
+    } catch (err) {
+      showToast(err.message || '修改密码失败', 'error');
+    }
+  });
+}
 
 // 锁定
 btnLogout.addEventListener('click', async () => {

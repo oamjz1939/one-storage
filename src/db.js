@@ -34,6 +34,11 @@ db.exec(`
     expires_at INTEGER NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+
   CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
   CREATE INDEX IF NOT EXISTS idx_files_expires_at ON files(expires_at);
 `);
@@ -43,6 +48,16 @@ const initNotepad = db.prepare(`
   INSERT OR IGNORE INTO notepad (id, content, updated_at) VALUES (1, '', ?)
 `);
 initNotepad.run(Date.now());
+
+// Settings 系统设置相关操作
+export const settingsDb = {
+  get: db.prepare(`SELECT value FROM settings WHERE key = ?`),
+  set: db.prepare(`
+    INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `),
+  delete: db.prepare(`DELETE FROM settings WHERE key = ?`),
+};
 
 // Sessions 相关操作
 export const sessionDb = {
