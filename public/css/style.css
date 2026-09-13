@@ -151,6 +151,13 @@ body {
   line-height: 1.2;
 }
 
+.btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+  pointer-events: none;
+  box-shadow: none;
+}
+
 .btn-sm {
   padding: 0.35rem 0.75rem;
   font-size: 0.8rem;
@@ -427,6 +434,12 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.file-list-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
 }
 
 .file-list-title {

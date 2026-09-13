@@ -125,6 +125,10 @@ export const api = {
     return request(`/api/files/${id}`, { method: 'DELETE' });
   },
 
+  async deleteAllFiles() {
+    return request('/api/files', { method: 'DELETE' });
+  },
+
   uploadFiles(files, onProgress) {
     let xhr;
     const promise = new Promise((resolve, reject) => {

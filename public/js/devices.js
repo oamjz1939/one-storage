@@ -1,5 +1,15 @@
 import { api } from './api.js';
 
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export class DevicesModalManager {
   constructor({ modalEl, listEl, btnOpen, btnClose, btnRevokeOthers, showToast }) {
     this.modalEl = modalEl;
@@ -48,15 +58,17 @@ export class DevicesModalManager {
         item.className = `device-item ${d.isCurrent ? 'current' : ''}`;
 
         const lastActiveTime = new Date(d.lastActiveAt).toLocaleString('zh-CN', { hour12: false });
+        const safeDeviceName = escapeHtml(d.deviceName || '未知设备');
+        const safeIp = escapeHtml(d.ip || '未知 IP');
 
         item.innerHTML = `
           <div class="device-meta">
             <div class="device-title">
-              <span>${d.deviceName || '未知设备'}</span>
+              <span>${safeDeviceName}</span>
               ${d.isCurrent ? '<span class="device-badge">当前设备</span>' : ''}
             </div>
             <div class="device-sub">
-              <span>IP: ${d.ip}</span> · 
+              <span>IP: ${safeIp}</span> · 
               <span>活跃: ${lastActiveTime}</span>
             </div>
           </div>

@@ -5,7 +5,9 @@ import { sessionDb, settingsDb } from './db.js';
 
 /**
  * 初始化密码系统与智能双通道监听：
- * 若检测到外部 SSH 修改了环境变量 APP_PASSWORD，自动强制覆盖并清除旧自定义密码
+ * 说明：此检测在服务进程启动（冷启动）时执行。
+ * 若管理员通过 SSH 修改了 docker-compose.yml 中的环境变量 APP_PASSWORD 并重启容器（docker compose up -d），
+ * 服务在启动加载阶段自动检测到环境变量变更，强制覆盖并清空旧的自定义密码，实现终极兜底恢复。
  */
 export function initPasswordSystem() {
   const currentEnvPass = config.APP_PASSWORD;

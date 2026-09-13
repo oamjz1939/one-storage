@@ -90,7 +90,10 @@
           <!-- 文件列表区域 -->
           <div class="file-list-header">
             <span class="file-list-title">已存文件 (<span id="file-count">0</span>)</span>
-            <button class="btn btn-text btn-sm" id="btn-refresh-files">刷新</button>
+            <div class="file-list-header-actions">
+              <button class="btn btn-text btn-sm" id="btn-refresh-files">刷新</button>
+              <button class="btn btn-danger-text btn-sm" id="btn-clear-all-files" disabled title="清空全部已存文件">全部删除</button>
+            </div>
           </div>
 
           <div class="file-list" id="file-list">

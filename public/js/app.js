@@ -55,6 +55,7 @@ const filesManager = new FilesManager({
   emptyStateEl: document.getElementById('empty-state'),
   countEl: document.getElementById('file-count'),
   btnRefresh: document.getElementById('btn-refresh-files'),
+  btnClearAll: document.getElementById('btn-clear-all-files'),
   showToast,
 });
 

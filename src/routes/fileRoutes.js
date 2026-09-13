@@ -82,27 +82,37 @@ router.post('/upload', requireAuth, (req, res) => {
 
   const uploadedFiles = [];
   const filePromises = [];
-  const activeTempFiles = new Set();
+  const activeUploads = new Map(); // fileId -> { tmpPath, writeStream, fileStream }
   let isLimitExceeded = false;
   let isAborted = false;
 
-  const cleanupAllActiveTempFiles = () => {
-    for (const tmpPath of activeTempFiles) {
-      fsp.unlink(tmpPath).catch(() => {});
+  const cleanupAllActiveUploads = () => {
+    for (const [fileId, item] of activeUploads.entries()) {
+      try {
+        if (item.writeStream && !item.writeStream.destroyed) {
+          item.writeStream.destroy();
+        }
+      } catch {}
+      try {
+        if (item.fileStream && !item.fileStream.destroyed) {
+          item.fileStream.destroy();
+        }
+      } catch {}
+      fsp.unlink(item.tmpPath).catch(() => {});
     }
-    activeTempFiles.clear();
+    activeUploads.clear();
   };
 
   req.on('aborted', () => {
     isAborted = true;
-    cleanupAllActiveTempFiles();
+    cleanupAllActiveUploads();
   });
 
   req.on('close', () => {
     // 仅当请求数据流未完全接收且响应未结束时，才判定为客户端异常掐断
     if (!req.complete && !res.writableEnded) {
       isAborted = true;
-      cleanupAllActiveTempFiles();
+      cleanupAllActiveUploads();
     }
   });
 
@@ -116,8 +126,8 @@ router.post('/upload', requireAuth, (req, res) => {
     const tmpPath = path.join(config.UPLOAD_DIR, `${fileId}.upload.tmp`);
     const finalPath = path.join(config.UPLOAD_DIR, storedName);
 
-    activeTempFiles.add(tmpPath);
     const writeStream = fs.createWriteStream(tmpPath);
+    activeUploads.set(fileId, { tmpPath, writeStream, fileStream });
     let bytesWritten = 0;
 
     fileStream.on('data', (data) => {
@@ -126,22 +136,30 @@ router.post('/upload', requireAuth, (req, res) => {
 
     fileStream.on('limit', () => {
       isLimitExceeded = true;
-      writeStream.destroy();
+      try {
+        writeStream.destroy();
+      } catch {}
       fsp.unlink(tmpPath).catch(() => {});
-      activeTempFiles.delete(tmpPath);
+      activeUploads.delete(fileId);
     });
 
     const promise = new Promise((resolve, reject) => {
       writeStream.on('finish', async () => {
         if (isAborted) {
+          try {
+            writeStream.destroy();
+          } catch {}
           fsp.unlink(tmpPath).catch(() => {});
-          activeTempFiles.delete(tmpPath);
-          return reject(new Error('上传已被客户端中止'));
+          activeUploads.delete(fileId);
+          return resolve(); // 客户端已主动掐断，安全解析以防 UnhandledPromiseRejection
         }
 
         if (isLimitExceeded) {
+          try {
+            writeStream.destroy();
+          } catch {}
           fsp.unlink(tmpPath).catch(() => {});
-          activeTempFiles.delete(tmpPath);
+          activeUploads.delete(fileId);
           return reject(new Error(`文件体积超出限制（最大 ${config.MAX_FILE_SIZE_MB}MB）`));
         }
 
@@ -152,7 +170,7 @@ router.post('/upload', requireAuth, (req, res) => {
           // 数据库记账成功后再重命名为正式物理文件名
           fileDb.create.run({
             id: fileId,
-            originalName: filename || '未命名文件',
+            originalName: filename,
             storedName,
             fileSize: bytesWritten,
             mimeType: mimeType || 'application/octet-stream',
@@ -161,7 +179,7 @@ router.post('/upload', requireAuth, (req, res) => {
           });
 
           await fsp.rename(tmpPath, finalPath);
-          activeTempFiles.delete(tmpPath);
+          activeUploads.delete(fileId);
 
           uploadedFiles.push({
             id: fileId,
@@ -172,22 +190,31 @@ router.post('/upload', requireAuth, (req, res) => {
 
           resolve();
         } catch (dbErr) {
+          try {
+            writeStream.destroy();
+          } catch {}
           fsp.unlink(tmpPath).catch(() => {});
-          activeTempFiles.delete(tmpPath);
+          activeUploads.delete(fileId);
           reject(dbErr);
         }
       });
 
       writeStream.on('error', (err) => {
+        try {
+          writeStream.destroy();
+        } catch {}
         fsp.unlink(tmpPath).catch(() => {});
-        activeTempFiles.delete(tmpPath);
+        activeUploads.delete(fileId);
         reject(err);
       });
 
       fileStream.on('error', (err) => {
-        writeStream.destroy();
+        try {
+          writeStream.destroy();
+          fileStream.destroy();
+        } catch {}
         fsp.unlink(tmpPath).catch(() => {});
-        activeTempFiles.delete(tmpPath);
+        activeUploads.delete(fileId);
         reject(err);
       });
     });
@@ -200,6 +227,11 @@ router.post('/upload', requireAuth, (req, res) => {
     try {
       await Promise.all(filePromises);
 
+      if (isAborted) {
+        cleanupAllActiveUploads();
+        return;
+      }
+
       // 广播更新通知
       realtimeHub.broadcastFileListUpdated();
 
@@ -209,7 +241,7 @@ router.post('/upload', requireAuth, (req, res) => {
         message: `成功上传 ${uploadedFiles.length} 个文件`,
       });
     } catch (err) {
-      cleanupAllActiveTempFiles();
+      cleanupAllActiveUploads();
       if (!res.headersSent) {
         res.status(400).json({ error: err.message || '上传处理失败' });
       }
@@ -217,7 +249,8 @@ router.post('/upload', requireAuth, (req, res) => {
   });
 
   bb.on('error', (err) => {
-    cleanupAllActiveTempFiles();
+    isAborted = true;
+    cleanupAllActiveUploads();
     if (!res.headersSent) {
       res.status(500).json({ error: '上传流解析异常' });
     }
@@ -248,7 +281,11 @@ router.get('/:id/download', requireAuth, (req, res) => {
   }
 
   const filename = safeDecodeFilename(file.original_name);
-  res.download(filePath, filename);
+  res.download(filePath, filename, (err) => {
+    if (err && !res.headersSent && err.code !== 'ECONNABORTED') {
+      console.error('[Download] 客户端中断或文件传输异常:', err.message);
+    }
+  });
 });
 
 /**
@@ -285,15 +322,20 @@ router.get('/:id/raw', requireAuth, (req, res) => {
     rawMime.includes('xml') ||
     rawMime.includes('javascript');
 
-  const encodedName = encodeURIComponent(filename);
-  if (isDangerous) {
-    // 强制作为附件下载，杜绝同源脚本执行
-    res.setHeader('Content-Disposition', `attachment; filename="${encodedName}"; filename*=UTF-8''${encodedName}`);
-    res.setHeader('Content-Type', 'application/octet-stream');
-  } else {
-    res.setHeader('Content-Type', file.mime_type || 'application/octet-stream');
-    res.setHeader('Content-Disposition', `inline; filename="${encodedName}"; filename*=UTF-8''${encodedName}`);
-  }
+  // 符合 RFC 6266 与 RFC 5987 标准的编码头：
+  // 1. fallback filename 使用安全纯 ASCII 字符，防止旧浏览器解析乱码
+  // 2. filename* 按照 RFC 5987 对单引号、括号和星号等保留字符进行严格百分比编码
+  const asciiFallback = filename.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '');
+  const rfc5987Name = encodeURIComponent(filename)
+    .replace(/['()]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase())
+    .replace(/\*/g, '%2A');
+
+  const dispositionType = isDangerous ? 'attachment' : 'inline';
+  res.setHeader(
+    'Content-Disposition',
+    `${dispositionType}; filename="${asciiFallback}"; filename*=UTF-8''${rfc5987Name}`
+  );
+  res.setHeader('Content-Type', isDangerous ? 'application/octet-stream' : (file.mime_type || 'application/octet-stream'));
 
   fs.createReadStream(filePath).pipe(res);
 });
@@ -325,6 +367,41 @@ router.delete('/:id', requireAuth, async (req, res) => {
   realtimeHub.broadcastFileListUpdated();
 
   res.json({ success: true, message: '文件已删除' });
+});
+
+/**
+ * 清空全部已存文件
+ * DELETE /api/files
+ */
+router.delete('/', requireAuth, async (req, res) => {
+  try {
+    const allFiles = fileDb.listAllStoredNames.all();
+
+    // 并行彻底删除磁盘上的所有实体物理文件
+    await Promise.all(
+      allFiles.map(async (file) => {
+        const filePath = path.join(config.UPLOAD_DIR, file.stored_name);
+        try {
+          await fsp.unlink(filePath);
+        } catch (err) {
+          if (err.code !== 'ENOENT') {
+            console.error('[DeleteAll] 删除物理文件失败:', file.stored_name, err);
+          }
+        }
+      })
+    );
+
+    // 清空数据库中所有文件记录
+    fileDb.deleteAll.run();
+
+    // 广播文件列表变动，所有已连接客户端同步清空
+    realtimeHub.broadcastFileListUpdated();
+
+    res.json({ success: true, message: '已清空所有文件' });
+  } catch (err) {
+    console.error('[DeleteAll] 清空所有文件失败:', err);
+    res.status(500).json({ error: '清空文件失败' });
+  }
 });
 
 export default router;

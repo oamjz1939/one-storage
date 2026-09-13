@@ -1,12 +1,23 @@
 import { api, authState } from './api.js';
 import { wsClient } from './ws.js';
 
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export class FilesManager {
-  constructor({ listContainer, emptyStateEl, countEl, btnRefresh, showToast }) {
+  constructor({ listContainer, emptyStateEl, countEl, btnRefresh, btnClearAll, showToast }) {
     this.listContainer = listContainer;
     this.emptyStateEl = emptyStateEl;
     this.countEl = countEl;
     this.btnRefresh = btnRefresh;
+    this.btnClearAll = btnClearAll;
     this.showToast = showToast;
 
     this.files = [];
@@ -21,6 +32,24 @@ export class FilesManager {
       this.loadFiles();
       this.showToast('已刷新', 'info');
     });
+
+    if (this.btnClearAll) {
+      this.btnClearAll.addEventListener('click', async () => {
+        if (this.files.length === 0) return;
+
+        if (confirm('确定清空全部已存文件？此操作将立即从服务器彻底抹除所有文件且无法撤销。')) {
+          try {
+            this.btnClearAll.disabled = true;
+            await api.deleteAllFiles();
+            this.showToast('已清空所有文件', 'success');
+            this.loadFiles(true);
+          } catch (err) {
+            this.showToast(`清空失败: ${err.message}`, 'error');
+            this.updateClearAllButtonState();
+          }
+        }
+      });
+    }
 
     wsClient.on('files_sync', () => {
       this.loadFiles(true);
@@ -50,8 +79,15 @@ export class FilesManager {
     return `${minutes}m`;
   }
 
+  updateClearAllButtonState() {
+    if (this.btnClearAll) {
+      this.btnClearAll.disabled = this.files.length === 0;
+    }
+  }
+
   render() {
     this.countEl.textContent = this.files.length;
+    this.updateClearAllButtonState();
 
     if (this.files.length === 0) {
       this.listContainer.innerHTML = '';
@@ -66,10 +102,11 @@ export class FilesManager {
     for (const file of this.files) {
       const item = document.createElement('div');
       item.className = 'file-item';
+      const safeName = escapeHtml(file.originalName);
 
       item.innerHTML = `
         <div class="file-info">
-          <span class="file-name" title="${file.originalName}">${file.originalName}</span>
+          <span class="file-name" title="${safeName}">${safeName}</span>
           <div class="file-submeta">
             <span>${this.formatBytes(file.fileSize)}</span>
             <span>·</span>

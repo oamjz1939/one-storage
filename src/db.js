@@ -142,6 +142,10 @@ export const fileDb = {
   listAllStoredNames: db.prepare(`
     SELECT stored_name FROM files
   `),
+
+  deleteAll: db.prepare(`
+    DELETE FROM files
+  `),
 };
 
 export default db;
