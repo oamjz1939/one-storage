@@ -12,6 +12,36 @@ import { realtimeHub } from '../websocket.js';
 const router = express.Router();
 
 /**
+ * 修复与规范化文件名编码 (解决 multipart Latin-1 解析导致的 UTF-8 中文乱码，并防止二次转码)
+ */
+export function safeDecodeFilename(rawName) {
+  if (!rawName || typeof rawName !== 'string') return '未命名文件';
+
+  // 1. 若已包含 > 255 的正常 Unicode 字符，说明已是正确解码的字符串
+  for (let i = 0; i < rawName.length; i++) {
+    if (rawName.charCodeAt(i) > 255) {
+      return rawName;
+    }
+  }
+
+  // 2. 检测是否存在 > 127 的 Latin-1 高位字符（多字节 UTF-8 被误当单字节 Latin-1 解析的典型特征）
+  const hasHighByte = rawName.split('').some((c) => c.charCodeAt(0) > 127);
+  if (!hasHighByte) {
+    return rawName;
+  }
+
+  // 3. 尝试还原为真正的 UTF-8 字符串
+  try {
+    const decoded = Buffer.from(rawName, 'latin1').toString('utf8');
+    if (!decoded.includes('\uFFFD')) {
+      return decoded;
+    }
+  } catch {}
+
+  return rawName;
+}
+
+/**
  * 获取文件列表
  * GET /api/files
  */
@@ -21,7 +51,7 @@ router.get('/', requireAuth, (req, res) => {
 
   const files = rawFiles.map((f) => ({
     id: f.id,
-    originalName: f.original_name,
+    originalName: safeDecodeFilename(f.original_name),
     fileSize: f.file_size,
     mimeType: f.mime_type,
     createdAt: f.created_at,
@@ -77,7 +107,8 @@ router.post('/upload', requireAuth, (req, res) => {
   });
 
   bb.on('file', (name, fileStream, info) => {
-    const { filename, mimeType } = info;
+    const rawFilename = info.filename || '未命名文件';
+    const filename = safeDecodeFilename(rawFilename);
     const fileId = crypto.randomUUID();
     const ext = path.extname(filename);
     const storedName = `${fileId}${ext}`;
@@ -215,7 +246,8 @@ router.get('/:id/download', requireAuth, (req, res) => {
     return res.status(404).send('物理文件未找到');
   }
 
-  res.download(filePath, file.original_name);
+  const filename = safeDecodeFilename(file.original_name);
+  res.download(filePath, filename);
 });
 
 /**
@@ -235,13 +267,15 @@ router.get('/:id/raw', requireAuth, (req, res) => {
     return res.status(404).send('物理文件未找到');
   }
 
+  const filename = safeDecodeFilename(file.original_name);
+
   // 严格的内容安全防护头
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
 
   // 判定是否为潜在恶意可执行脚本文件 (HTML, SVG, XML, JS 等)
   const rawMime = (file.mime_type || '').toLowerCase();
-  const ext = path.extname(file.original_name).toLowerCase();
+  const ext = path.extname(filename).toLowerCase();
   const dangerousExts = ['.html', '.htm', '.svg', '.xml', '.xhtml', '.js', '.mjs', '.php', '.sh'];
   const isDangerous =
     dangerousExts.includes(ext) ||
@@ -250,13 +284,14 @@ router.get('/:id/raw', requireAuth, (req, res) => {
     rawMime.includes('xml') ||
     rawMime.includes('javascript');
 
+  const encodedName = encodeURIComponent(filename);
   if (isDangerous) {
     // 强制作为附件下载，杜绝同源脚本执行
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(file.original_name)}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodedName}"; filename*=UTF-8''${encodedName}`);
     res.setHeader('Content-Type', 'application/octet-stream');
   } else {
     res.setHeader('Content-Type', file.mime_type || 'application/octet-stream');
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.original_name)}"`);
+    res.setHeader('Content-Disposition', `inline; filename="${encodedName}"; filename*=UTF-8''${encodedName}`);
   }
 
   fs.createReadStream(filePath).pipe(res);
