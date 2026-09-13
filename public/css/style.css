@@ -19,6 +19,13 @@
   
   --md-sys-color-success: #146c2e;
   --md-sys-color-success-container: #c4eed0;
+
+  /* 语义色彩兼容别名 */
+  --success-color: var(--md-sys-color-success);
+  --warning-color: #b06000;
+  --danger-color: var(--md-sys-color-error);
+  --text-muted: var(--md-sys-color-on-surface-variant);
+  --accent-color: var(--md-sys-color-primary);
   
   --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;

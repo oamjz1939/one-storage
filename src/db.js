@@ -119,6 +119,14 @@ export const fileDb = {
   findExpired: db.prepare(`
     SELECT * FROM files WHERE expires_at <= ?
   `),
+
+  findByStoredName: db.prepare(`
+    SELECT id FROM files WHERE stored_name = ?
+  `),
+
+  listAllStoredNames: db.prepare(`
+    SELECT stored_name FROM files
+  `),
 };
 
 export default db;

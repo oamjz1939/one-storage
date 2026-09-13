@@ -4,15 +4,46 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import crypto from 'node:crypto';
 import busboy from 'busboy';
-import { requireAuth } from '../auth.js';
+import { requireAuth, validateToken } from '../auth.js';
 import { config } from '../config.js';
 import { fileDb } from '../db.js';
 import { realtimeHub } from '../websocket.js';
+import { createDownloadTicket, verifyDownloadTicket } from '../tickets.js';
 
 const router = express.Router();
 
 /**
+ * 文件访问鉴权中间件
+ * 支持:
+ * 1. URL 临时下载 Ticket (?ticket=xxx)
+ * 2. Header Authorization Bearer Token
+ */
+function requireFileAccess(req, res, next) {
+  const fileId = req.params.id;
+  const ticket = req.query.ticket;
+
+  // 1. 优先校验临时下载 Ticket
+  if (ticket && verifyDownloadTicket(ticket, fileId)) {
+    return next();
+  }
+
+  // 2. 校验会话 Bearer Token
+  let token = null;
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.substring(7).trim();
+  }
+
+  if (token && validateToken(token)) {
+    return next();
+  }
+
+  return res.status(401).json({ error: '无效或已过期的访问凭证，请登录或重新获取链接' });
+}
+
+/**
  * 获取文件列表
+ * GET /api/files
  */
 router.get('/', requireAuth, (req, res) => {
   const now = Date.now();
@@ -32,7 +63,33 @@ router.get('/', requireAuth, (req, res) => {
 });
 
 /**
- * 流式大文件上传
+ * 为指定文件申请短期只读下载凭证
+ * POST /api/files/:id/ticket
+ */
+router.post('/:id/ticket', requireAuth, (req, res) => {
+  const fileId = req.params.id;
+  const file = fileDb.findById.get(fileId);
+
+  if (!file || file.expires_at <= Date.now()) {
+    return res.status(404).json({ error: '文件不存在或已过期' });
+  }
+
+  // Ticket 有效期为 1 小时，且不超过文件剩余存活时间
+  const remainingTime = file.expires_at - Date.now();
+  const ttlMs = Math.max(60 * 1000, Math.min(60 * 60 * 1000, remainingTime));
+  const { ticket, expiresAt } = createDownloadTicket(fileId, ttlMs);
+
+  res.json({
+    ticket,
+    expiresAt,
+    downloadUrl: `/api/files/${fileId}/download?ticket=${ticket}`,
+    rawUrl: `/api/files/${fileId}/raw?ticket=${ticket}`,
+  });
+});
+
+/**
+ * 流式大文件上传 (带临时文件隔离与中断清理保护)
+ * POST /api/files/upload
  */
 router.post('/upload', requireAuth, (req, res) => {
   let bb;
@@ -41,7 +98,7 @@ router.post('/upload', requireAuth, (req, res) => {
       headers: req.headers,
       limits: {
         fileSize: config.MAX_FILE_SIZE_BYTES,
-        files: 10, // 单次最多上传10个文件
+        files: 10,
       },
     });
   } catch (err) {
@@ -50,16 +107,39 @@ router.post('/upload', requireAuth, (req, res) => {
 
   const uploadedFiles = [];
   const filePromises = [];
+  const activeTempFiles = new Set();
   let isLimitExceeded = false;
+  let isAborted = false;
+
+  const cleanupAllActiveTempFiles = () => {
+    for (const tmpPath of activeTempFiles) {
+      fsp.unlink(tmpPath).catch(() => {});
+    }
+    activeTempFiles.clear();
+  };
+
+  req.on('aborted', () => {
+    isAborted = true;
+    cleanupAllActiveTempFiles();
+  });
+
+  req.on('close', () => {
+    if (!res.writableEnded) {
+      isAborted = true;
+      cleanupAllActiveTempFiles();
+    }
+  });
 
   bb.on('file', (name, fileStream, info) => {
     const { filename, mimeType } = info;
     const fileId = crypto.randomUUID();
     const ext = path.extname(filename);
     const storedName = `${fileId}${ext}`;
-    const targetPath = path.join(config.UPLOAD_DIR, storedName);
+    const tmpPath = path.join(config.UPLOAD_DIR, `${fileId}.upload.tmp`);
+    const finalPath = path.join(config.UPLOAD_DIR, storedName);
 
-    const writeStream = fs.createWriteStream(targetPath);
+    activeTempFiles.add(tmpPath);
+    const writeStream = fs.createWriteStream(tmpPath);
     let bytesWritten = 0;
 
     fileStream.on('data', (data) => {
@@ -69,39 +149,67 @@ router.post('/upload', requireAuth, (req, res) => {
     fileStream.on('limit', () => {
       isLimitExceeded = true;
       writeStream.destroy();
-      fsp.unlink(targetPath).catch(() => {});
+      fsp.unlink(tmpPath).catch(() => {});
+      activeTempFiles.delete(tmpPath);
     });
 
     const promise = new Promise((resolve, reject) => {
-      writeStream.on('finish', () => {
+      writeStream.on('finish', async () => {
+        if (isAborted) {
+          fsp.unlink(tmpPath).catch(() => {});
+          activeTempFiles.delete(tmpPath);
+          return reject(new Error('上传已被客户端中止'));
+        }
+
         if (isLimitExceeded) {
+          fsp.unlink(tmpPath).catch(() => {});
+          activeTempFiles.delete(tmpPath);
           return reject(new Error(`文件体积超出限制（最大 ${config.MAX_FILE_SIZE_MB}MB）`));
         }
 
         const now = Date.now();
         const expiresAt = now + config.FILE_EXPIRE_HOURS * 60 * 60 * 1000;
 
-        fileDb.create.run({
-          id: fileId,
-          originalName: filename || '未命名文件',
-          storedName,
-          fileSize: bytesWritten,
-          mimeType: mimeType || 'application/octet-stream',
-          createdAt: now,
-          expiresAt,
-        });
+        try {
+          // 数据库记账成功后再重命名为正式物理文件名
+          fileDb.create.run({
+            id: fileId,
+            originalName: filename || '未命名文件',
+            storedName,
+            fileSize: bytesWritten,
+            mimeType: mimeType || 'application/octet-stream',
+            createdAt: now,
+            expiresAt,
+          });
 
-        uploadedFiles.push({
-          id: fileId,
-          originalName: filename,
-          fileSize: bytesWritten,
-          expiresAt,
-        });
+          await fsp.rename(tmpPath, finalPath);
+          activeTempFiles.delete(tmpPath);
 
-        resolve();
+          uploadedFiles.push({
+            id: fileId,
+            originalName: filename,
+            fileSize: bytesWritten,
+            expiresAt,
+          });
+
+          resolve();
+        } catch (dbErr) {
+          fsp.unlink(tmpPath).catch(() => {});
+          activeTempFiles.delete(tmpPath);
+          reject(dbErr);
+        }
       });
 
       writeStream.on('error', (err) => {
+        fsp.unlink(tmpPath).catch(() => {});
+        activeTempFiles.delete(tmpPath);
+        reject(err);
+      });
+
+      fileStream.on('error', (err) => {
+        writeStream.destroy();
+        fsp.unlink(tmpPath).catch(() => {});
+        activeTempFiles.delete(tmpPath);
         reject(err);
       });
     });
@@ -123,23 +231,28 @@ router.post('/upload', requireAuth, (req, res) => {
         message: `成功上传 ${uploadedFiles.length} 个文件`,
       });
     } catch (err) {
-      console.error('[Upload] 文件保存失败:', err);
-      res.status(400).json({ error: err.message || '上传处理失败' });
+      cleanupAllActiveTempFiles();
+      if (!res.headersSent) {
+        res.status(400).json({ error: err.message || '上传处理失败' });
+      }
     }
   });
 
   bb.on('error', (err) => {
-    console.error('[Upload] Busboy 解析出错:', err);
-    res.status(500).json({ error: '上传流解析异常' });
+    cleanupAllActiveTempFiles();
+    if (!res.headersSent) {
+      res.status(500).json({ error: '上传流解析异常' });
+    }
   });
 
   req.pipe(bb);
 });
 
 /**
- * 下载文件
+ * 下载文件 (凭证校验)
+ * GET /api/files/:id/download
  */
-router.get('/:id/download', requireAuth, (req, res) => {
+router.get('/:id/download', requireFileAccess, (req, res) => {
   const fileId = req.params.id;
   const file = fileDb.findById.get(fileId);
 
@@ -160,9 +273,10 @@ router.get('/:id/download', requireAuth, (req, res) => {
 });
 
 /**
- * 预览 / 在线查看
+ * 预览 / 在线查看 (防存储型 XSS 安全防护)
+ * GET /api/files/:id/raw
  */
-router.get('/:id/raw', requireAuth, (req, res) => {
+router.get('/:id/raw', requireFileAccess, (req, res) => {
   const fileId = req.params.id;
   const file = fileDb.findById.get(fileId);
 
@@ -175,12 +289,36 @@ router.get('/:id/raw', requireAuth, (req, res) => {
     return res.status(404).send('物理文件未找到');
   }
 
-  res.setHeader('Content-Type', file.mime_type || 'application/octet-stream');
+  // 严格的内容安全防护头
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+
+  // 判定是否为潜在恶意可执行脚本文件 (HTML, SVG, XML, JS 等)
+  const rawMime = (file.mime_type || '').toLowerCase();
+  const ext = path.extname(file.original_name).toLowerCase();
+  const dangerousExts = ['.html', '.htm', '.svg', '.xml', '.xhtml', '.js', '.mjs', '.php', '.sh'];
+  const isDangerous =
+    dangerousExts.includes(ext) ||
+    rawMime.includes('html') ||
+    rawMime.includes('svg') ||
+    rawMime.includes('xml') ||
+    rawMime.includes('javascript');
+
+  if (isDangerous) {
+    // 强制作为附件下载，杜绝同源脚本执行
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(file.original_name)}"`);
+    res.setHeader('Content-Type', 'application/octet-stream');
+  } else {
+    res.setHeader('Content-Type', file.mime_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.original_name)}"`);
+  }
+
   fs.createReadStream(filePath).pipe(res);
 });
 
 /**
  * 手动删除文件
+ * DELETE /api/files/:id
  */
 router.delete('/:id', requireAuth, async (req, res) => {
   const fileId = req.params.id;

@@ -63,7 +63,7 @@ class RealtimeHub {
     });
 
     // 定期心跳检测
-    const heartbeatInterval = setInterval(() => {
+    this.heartbeatInterval = setInterval(() => {
       for (const [ws, info] of this.clients.entries()) {
         if (!info.isAlive) {
           this.clients.delete(ws);
@@ -76,7 +76,10 @@ class RealtimeHub {
     }, 30000);
 
     this.wss.on('close', () => {
-      clearInterval(heartbeatInterval);
+      if (this.heartbeatInterval) {
+        clearInterval(this.heartbeatInterval);
+        this.heartbeatInterval = null;
+      }
     });
   }
 
@@ -162,6 +165,27 @@ class RealtimeHub {
         }
         this.clients.delete(ws);
       }
+    }
+  }
+
+  /**
+   * 平稳关闭所有 WebSocket 连接与服务
+   */
+  close() {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+    for (const [ws] of this.clients.entries()) {
+      try {
+        ws.close(1001, 'Server shutting down');
+      } catch {}
+    }
+    this.clients.clear();
+    if (this.wss) {
+      try {
+        this.wss.close();
+      } catch {}
     }
   }
 }

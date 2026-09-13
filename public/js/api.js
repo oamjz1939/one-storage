@@ -114,6 +114,10 @@ export const api = {
     return request('/api/files');
   },
 
+  async getDownloadTicket(fileId) {
+    return request(`/api/files/${fileId}/ticket`, { method: 'POST' });
+  },
+
   async deleteFile(id) {
     return request(`/api/files/${id}`, { method: 'DELETE' });
   },

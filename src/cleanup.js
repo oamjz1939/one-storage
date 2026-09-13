@@ -45,6 +45,43 @@ export async function runCleanup() {
   } catch (err) {
     console.error('[Cleanup] 清理过期会话出错:', err);
   }
+
+  // 3. 磁盘反向扫描：清理孤儿文件与未完成上传的残留临时文件
+  try {
+    const diskFiles = await fs.readdir(config.UPLOAD_DIR);
+    const knownRows = fileDb.listAllStoredNames.all();
+    const knownStoredNames = new Set(knownRows.map((r) => r.stored_name));
+    let orphanCount = 0;
+
+    for (const filename of diskFiles) {
+      const filePath = path.join(config.UPLOAD_DIR, filename);
+      const stat = await fs.stat(filePath).catch(() => null);
+      if (!stat || !stat.isFile()) continue;
+
+      const fileAgeMs = now - stat.mtimeMs;
+
+      // 超过 15 分钟未完成的临时文件，判定为中断上传残留
+      if (filename.endsWith('.upload.tmp')) {
+        if (fileAgeMs > 15 * 60 * 1000) {
+          await fs.unlink(filePath).catch(() => {});
+          orphanCount++;
+        }
+        continue;
+      }
+
+      // 磁盘上有但数据库无记录，且创建超过 15 分钟的孤儿文件
+      if (!knownStoredNames.has(filename) && fileAgeMs > 15 * 60 * 1000) {
+        await fs.unlink(filePath).catch(() => {});
+        orphanCount++;
+      }
+    }
+
+    if (orphanCount > 0) {
+      console.log(`[Cleanup] 已自动清理 ${orphanCount} 个磁盘孤儿/残留临时文件`);
+    }
+  } catch (err) {
+    console.error('[Cleanup] 扫描孤儿文件出错:', err);
+  }
 }
 
 /**
@@ -55,4 +92,13 @@ export function startCleanupJob(intervalMinutes = 5) {
   runCleanup();
   const intervalMs = intervalMinutes * 60 * 1000;
   return setInterval(runCleanup, intervalMs);
+}
+
+/**
+ * 停止定时清理服务
+ */
+export function stopCleanupJob(timer) {
+  if (timer) {
+    clearInterval(timer);
+  }
 }
