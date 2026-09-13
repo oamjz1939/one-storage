@@ -388,10 +388,23 @@ body {
 .progress-header {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   font-size: 0.8rem;
   font-weight: 500;
   color: var(--md-sys-color-on-primary-container);
   margin-bottom: 0.45rem;
+}
+
+.progress-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+#btn-cancel-upload {
+  padding: 0.1rem 0.4rem;
+  font-size: 0.75rem;
+  line-height: 1.2;
 }
 
 .progress-bar-bg {

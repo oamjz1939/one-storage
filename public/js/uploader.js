@@ -7,6 +7,17 @@ export function initUploader({ onUploadSuccess, onUploadError, showToast }) {
   const progressBarFill = document.getElementById('progress-bar-fill');
   const progressFilename = document.getElementById('upload-filename');
   const progressPercentage = document.getElementById('upload-percentage');
+  const btnCancelUpload = document.getElementById('btn-cancel-upload');
+
+  let currentUploadTask = null;
+
+  if (btnCancelUpload) {
+    btnCancelUpload.addEventListener('click', () => {
+      if (currentUploadTask && typeof currentUploadTask.abort === 'function') {
+        currentUploadTask.abort();
+      }
+    });
+  }
 
   // 点击选择文件
   dropzone.addEventListener('click', () => {
@@ -86,7 +97,7 @@ export function initUploader({ onUploadSuccess, onUploadError, showToast }) {
       : `${files.length} 个文件`;
 
     try {
-      const res = await api.uploadFiles(files, (percent, loaded, total) => {
+      currentUploadTask = api.uploadFiles(files, (percent, loaded, total) => {
         progressPercentage.textContent = `${percent}%`;
         progressBarFill.style.width = `${percent}%`;
         
@@ -97,6 +108,8 @@ export function initUploader({ onUploadSuccess, onUploadError, showToast }) {
           : `${files.length} 个文件 (${loadedMb}/${totalMb}MB)`;
       });
 
+      const res = await currentUploadTask;
+
       showToast('上传完成', 'success');
       setTimeout(() => {
         progressContainer.style.display = 'none';
@@ -104,12 +117,18 @@ export function initUploader({ onUploadSuccess, onUploadError, showToast }) {
 
       if (onUploadSuccess) onUploadSuccess(res);
     } catch (err) {
-      showToast(`上传失败: ${err.message}`, 'error');
-      setTimeout(() => {
+      if (err.name === 'AbortError' || err.message === '上传已取消') {
+        showToast('已取消上传', 'info');
         progressContainer.style.display = 'none';
-      }, 2000);
-
-      if (onUploadError) onUploadError(err);
+      } else {
+        showToast(`上传失败: ${err.message}`, 'error');
+        setTimeout(() => {
+          progressContainer.style.display = 'none';
+        }, 2000);
+        if (onUploadError) onUploadError(err);
+      }
+    } finally {
+      currentUploadTask = null;
     }
   }
 }

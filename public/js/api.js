@@ -126,13 +126,14 @@ export const api = {
   },
 
   uploadFiles(files, onProgress) {
-    return new Promise((resolve, reject) => {
+    let xhr;
+    const promise = new Promise((resolve, reject) => {
       const formData = new FormData();
       for (const file of files) {
         formData.append('files', file, file.name);
       }
 
-      const xhr = new XMLHttpRequest();
+      xhr = new XMLHttpRequest();
       xhr.open('POST', '/api/files/upload');
 
       const token = authState.getToken();
@@ -166,7 +167,20 @@ export const api = {
       };
 
       xhr.onerror = () => reject(new Error('网络请求异常'));
+      xhr.onabort = () => {
+        const err = new Error('上传已取消');
+        err.name = 'AbortError';
+        reject(err);
+      };
       xhr.send(formData);
     });
+
+    promise.abort = () => {
+      if (xhr) {
+        xhr.abort();
+      }
+    };
+
+    return promise;
   },
 };

@@ -77,7 +77,10 @@
           <div class="upload-progress-container" id="upload-progress">
             <div class="progress-header">
               <span id="upload-filename">正在上传...</span>
-              <span id="upload-percentage">0%</span>
+              <div class="progress-actions">
+                <span id="upload-percentage">0%</span>
+                <button type="button" class="btn btn-danger-text btn-sm" id="btn-cancel-upload" title="取消上传">取消</button>
+              </div>
             </div>
             <div class="progress-bar-bg">
               <div class="progress-bar-fill" id="progress-bar-fill"></div>
